@@ -10,7 +10,7 @@ Designed and built with AI assistance (Claude) to Vinícius Raposo's brief, then
 
 **Project page:** [fishraposo.github.io/projects/wick.html](https://fishraposo.github.io/projects/wick.html)
 
-**Play:** in the browser on itch.io *(link added after upload)*, or run it locally:
+**Play:** [in the browser](https://fishraposo.github.io/wick/), or run it locally:
 
 ```bash
 git clone https://github.com/FishRaposo/wick.git
