@@ -1,0 +1,17 @@
+{
+  "name": "wick",
+  "version": "1.0.0",
+  "description": "A turn-based roguelike where your lantern oil is your field of view.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "npx --yes serve -l 8080 .",
+    "test": "node --test",
+    "check": "node scripts/check.mjs",
+    "tasks": "node tasks/verify.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
