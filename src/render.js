@@ -338,7 +338,7 @@ export function drawOver(ctx, s, best, t) {
     text(ctx, k, W / 2 - 10, 300 + i * 20, { size: 12, align: 'right', color: C.dim, alpha: a });
     text(ctx, `${v}`, W / 2 + 10, 300 + i * 20, { size: 12, alpha: a });
   });
-  if (s.score >= best.score && s.score > 0) text(ctx, 'deepest yet', W / 2, 372, { size: 12, align: 'center', color: C.amber, weight: 'bold', alpha: a });
+  if (s.score >= best.score && s.score > 0) text(ctx, 'best run yet', W / 2, 372, { size: 12, align: 'center', color: C.amber, weight: 'bold', alpha: a });
   text(ctx, 'R or click to light another', W / 2, 420, { size: 13, align: 'center', alpha: t > 0.8 ? 1 : 0.3 });
 }
 

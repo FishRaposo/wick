@@ -1,0 +1,42 @@
+diff --git b/src/rules.js a/src/rules.js
+index 7a6b6de..102ba89 100644
+--- b/src/rules.js
++++ a/src/rules.js
+@@ -48,7 +48,7 @@ export function enterFloor(s, depth, floor = generateFloor(depth, s.rng)) {
+   s.player.x = floor.start.x;
+   s.player.y = floor.start.y;
+   s.items = floor.items.map((i) => ({ ...i }));
+-  s.enemies.push(...floor.spawns.map((sp) => makeEnemy(s, sp.kind, sp.x, sp.y)));
++  s.enemies = floor.spawns.map((sp) => makeEnemy(s, sp.kind, sp.x, sp.y));
+   s.seen.fill(0);
+   s.noise = null;
+   updateVision(s);
+diff --git b/test/rules.test.js a/test/rules.test.js
+index bd87ff4..5fd77f5 100644
+--- b/test/rules.test.js
++++ a/test/rules.test.js
+@@ -235,6 +235,24 @@ test('a hound does not hear through solid rock', () => {
+   assert.equal(s.enemies[0].target, null);
+ });
+ 
++test('taking the stairs builds a new floor with its own enemies', () => {
++  const s = createRun(12);
++  const firstIds = new Set(s.enemies.map((e) => e.id));
++  // Teleport next to the stairs and step on.
++  const d = distanceMap(s.tiles, [[s.stairs.x, s.stairs.y]]);
++  const [nx, ny] = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => [s.stairs.x + dx, s.stairs.y + dy]).find(([x, y]) => d[idx(x, y)] === 1);
++  s.player.x = nx;
++  s.player.y = ny;
++  for (const e of s.enemies) if (Math.abs(e.x - nx) + Math.abs(e.y - ny) <= 1) e.x = e.y = -10;
++  act(s, move(s.stairs.x - nx, s.stairs.y - ny));
++  assert.equal(s.depth, 2);
++  assert.ok(s.enemies.length > 0);
++  for (const e of s.enemies) {
++    assert.ok(!firstIds.has(e.id));
++    assert.notEqual(s.tiles[idx(e.x, e.y)], TILE.WALL);
++  }
++});
++
+ test('bumping an enemy attacks it; killing scores', () => {
+   const s = createRun(7, { generate: false });
+   loadMap(s, openRoom({ '5,10': '@', '6,10': 'h' }));

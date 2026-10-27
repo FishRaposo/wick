@@ -1,0 +1,51 @@
+diff --git b/src/rules.js a/src/rules.js
+index 8b7102b..102ba89 100644
+--- b/src/rules.js
++++ a/src/rules.js
+@@ -191,6 +191,7 @@ function enemiesAct(s) {
+   const p = s.player;
+   const toPlayer = distanceMap(s.tiles, [[p.x, p.y]]);
+   let flee = null; // built lazily: only shades need it
++  const heard = s.noise ? distanceMap(s.tiles, [[s.noise.x, s.noise.y]]) : null;
+ 
+   for (const e of s.enemies) {
+     if (e.hp <= 0 || s.over) continue;
+@@ -218,11 +219,11 @@ function enemiesAct(s) {
+         wander(s, e);
+       }
+     } else if (e.kind === 'hound') {
+-      // Hounds hunt by sound. A noise reaches a hound within the noise's range.
+-      // They go to where they heard it, then sniff around.
+-      if (s.noise) {
+-        const hd = Math.hypot(e.x - s.noise.x, e.y - s.noise.y); // cheaper than a pathfind every turn
+-        if (hd <= s.noise.r) {
++      // Hounds hunt by sound. A noise reaches a hound if it's within the noise's range measured
++      // along the corridors, not through rock. They go to where they heard it, then sniff around.
++      if (heard) {
++        const hd = heard[idx(e.x, e.y)];
++        if (hd >= 0 && hd <= s.noise.r) {
+           if (!e.target) s.events.push({ type: 'alert', id: e.id, x: e.x, y: e.y });
+           e.target = { x: s.noise.x, y: s.noise.y };
+         }
+diff --git b/test/rules.test.js a/test/rules.test.js
+index 0770bc4..5fd77f5 100644
+--- b/test/rules.test.js
++++ a/test/rules.test.js
+@@ -224,6 +224,17 @@ test('a hound hears footsteps along the corridors, then comes to where it heard
+   assert.equal(t.enemies[0].target, null, 'waiting makes no sound');
+ });
+ 
++test('a hound does not hear through solid rock', () => {
++  // Hound 4 tiles away in a straight line, but behind a wall that takes 20+ steps to walk around.
++  const rows = openRoom();
++  for (let y = 1; y < MAP_H - 2; y++) rows[y] = rows[y].slice(0, 8) + '#' + rows[y].slice(9);
++  rows[10] = rows[10].slice(0, 6) + '@' + rows[10].slice(7, 10) + 'h' + rows[10].slice(11);
++  const s = createRun(6, { generate: false });
++  loadMap(s, rows);
++  act(s, move(0, -1));
++  assert.equal(s.enemies[0].target, null);
++});
++
+ test('taking the stairs builds a new floor with its own enemies', () => {
+   const s = createRun(12);
+   const firstIds = new Set(s.enemies.map((e) => e.id));
