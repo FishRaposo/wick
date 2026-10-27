@@ -129,7 +129,7 @@ index 589020c..1d40e45 100644
  
 @@ -314,6 +343,7 @@ export function drawTitle(ctx, time, best) {
      ['move', 'arrows · WASD · d-pad · tap'],
-     ['wait', 'space · . · A'],
+     ['wait', 'space · . · Z · pad A'],
      ['attack', 'walk into it'],
 +    ['pour oil', 'X · E · B'],
      ['mute', 'M'],
