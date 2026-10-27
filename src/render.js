@@ -312,7 +312,7 @@ export function drawTitle(ctx, time, best) {
   text(ctx, 'the oil is the light. the light is the map.', W / 2, 296, { size: 17, align: 'center', font: FONT.serif, style: 'italic', color: C.dim });
   const rows = [
     ['move', 'arrows · WASD · d-pad · tap'],
-    ['wait', 'space · . · A'],
+    ['wait', 'space · . · Z · pad A'],
     ['attack', 'walk into it'],
     ['mute', 'M'],
   ];
