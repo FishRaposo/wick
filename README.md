@@ -6,6 +6,8 @@ A turn-based roguelike where your lantern's oil is your field of view.
 
 Every floor is generated from a seed. You need the stairs, and you only see what your lantern lights. Oil burns as you walk, and the light shrinks with it. Three things live down here, and each one reacts to the light differently: moths fly at it, shades flee its bright core and wait at the edge for it to go out, and hounds ignore it and hunt you by sound.
 
+Designed and built with AI assistance (Claude) to Vinícius Raposo's brief, then tested like production software.
+
 **Project page:** [fishraposo.github.io/projects/wick.html](https://fishraposo.github.io/projects/wick.html)
 
 **Play:** in the browser on itch.io *(link added after upload)*, or run it locally:
