@@ -13,7 +13,7 @@
     "start": "npm run build && node scripts/dev.mjs 8080",
     "serve": "node scripts/serve.mjs 8080",
     "test": "node --test \"test/**/*.test.ts\"",
-    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.ts\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=95 \"test/**/*.test.ts\"",
     "tasks": "node tasks/verify.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:chromium": "node scripts/smoke.mjs --browser=chromium",
