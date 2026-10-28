@@ -36,9 +36,12 @@ await page.keyboard.press('KeyO');
 await page.waitForSelector('dialog[open]');
 await scan('settings dialog');
 await page.locator('dialog .actions button').last().click();
+await page.waitForSelector('dialog', { state: 'detached' });
 
-await page.keyboard.press('Space');
+await page.evaluate(() => document.getElementById('game')?.focus());
+await page.mouse.click(480, 270);
 await page.waitForFunction(() => window.__wick.state === 'play', undefined, { timeout: 5000 });
+await page.waitForTimeout(150);
 await page.keyboard.press('Escape');
 await page.waitForSelector('dialog[open]');
 await scan('pause dialog');
