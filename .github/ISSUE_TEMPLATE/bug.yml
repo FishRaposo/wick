@@ -1,0 +1,26 @@
+name: Bug report
+description: Something in the game behaves incorrectly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the report. Please include the seed shown on the title or death screen when possible.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: seed
+    attributes:
+      label: Seed
+      description: The seed from the title or death screen, if you have it.
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and device
+      placeholder: Chrome 130 on Windows 11
+    validations:
+      required: true

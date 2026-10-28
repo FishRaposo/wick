@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright
 OUT = sys.argv[1] if len(sys.argv) > 1 else '.'
 BASE = sys.argv[2] if len(sys.argv) > 2 else 'http://localhost:8080'
 errors = []
-STEP = """async () => { const s = window.__wick.s; const { distanceMap } = await import('/src/path.js');
+STEP = """async () => { const s = window.__wick.s; const { distanceMap } = await import('/dist/core/path.js');
   const d = distanceMap(s.tiles, [[s.stairs.x, s.stairs.y]]); const W = 40;
   const o = [[0,-1,'ArrowUp'],[1,0,'ArrowRight'],[0,1,'ArrowDown'],[-1,0,'ArrowLeft']]
     .map(([dx, dy, k]) => [k, d[(s.player.y + dy) * W + s.player.x + dx]]).filter(a => a[1] >= 0).sort((a, b) => a[1] - b[1]);

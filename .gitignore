@@ -1,5 +1,10 @@
 node_modules/
 dist/
+dist-test/
+site/
+itch.zip
+coverage/
+.tmp/
 *.webm
 .DS_Store
 Thumbs.db

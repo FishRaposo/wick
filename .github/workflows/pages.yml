@@ -1,4 +1,4 @@
-# Publishes the game to GitHub Pages on every push to main.
+# Publishes the built game to GitHub Pages on every push to main.
 # One-time setup: repo Settings → Pages → Source: "GitHub Actions".
 name: pages
 on:
@@ -20,7 +20,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir site && cp -r index.html src site/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - run: node scripts/check-module-graph.mjs --prefix /wick/
+      - run: npm test
+      - run: mkdir -p site && cp index.html site/ && cp -r dist site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

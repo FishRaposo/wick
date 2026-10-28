@@ -4,16 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Wick</title>
-  <meta name="description" content="A turn-based roguelike where your lantern's oil is your field of view. Moths chase the light, shades flee it, hounds hunt by sound.">
+  <link rel="icon" href="data:,">
+  <meta name="description" content="A turn-based roguelike where your lantern's oil is your field of view. Moths chase the light, shades flee it, hounds hunt by sound, and lurkers wait in the dark.">
   <style>
     html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
     canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
     noscript { position: fixed; inset: 0; display: grid; place-items: center; font: 16px Georgia, serif; color: #e8dcc4; }
   </style>
+  <link rel="stylesheet" href="dist/styles.css">
 </head>
 <body>
   <canvas id="game" tabindex="0" aria-label="Wick: game canvas. Press any key to begin."></canvas>
+  <div id="ui" class="ui-root"></div>
+  <div id="announcer" class="sr-only" aria-live="polite"></div>
   <noscript>Wick needs JavaScript to run.</noscript>
-  <script type="module" src="src/main.js"></script>
+  <script type="module" src="dist/main.js"></script>
 </body>
 </html>

@@ -1,10 +1,70 @@
-diff --git a/src/config.js b/src/config.js
-index e369096..d282980 100644
---- a/src/config.js
-+++ b/src/config.js
-@@ -29,5 +29,13 @@ export const ENEMY = {
-   hound: { hp: 3, dmg: 1, unlock: 3, cost: 4, points: 20 },
- };
+diff --git a/src/core/types.ts b/src/core/types.ts
+index f325b26..5510ed0 100644
+--- a/src/core/types.ts
++++ b/src/core/types.ts
+@@ -26,6 +26,13 @@ export interface Spawn {
+   y: number;
+ }
+ 
++export interface Pool {
++  x: number;
++  y: number;
++  ttl: number;
++  fov: Uint8Array | null;
++}
++
+ export interface Floor {
+   depth: number;
+   theme: string;
+@@ -80,15 +87,19 @@ export type RunEvent =
+   | { type: 'dark' }
+   | { type: 'floor'; depth: number }
+   | { type: 'die' }
+-  | { type: 'emove'; id: number; from: { x: number; y: number }; to: { x: number; y: number } };
++  | { type: 'emove'; id: number; from: { x: number; y: number }; to: { x: number; y: number } }
++  | { type: 'pour'; x: number; y: number }
++  | { type: 'cant'; reason: string }
++  | { type: 'pool-out' };
+ 
+-export type Action = { type: 'move'; dx: number; dy: number } | { type: 'wait' };
++export type Action = { type: 'move'; dx: number; dy: number } | { type: 'wait' } | { type: 'pour' };
+ 
+ export interface EnemyContext {
+   state: RunState;
+   enemy: Enemy;
+   player: Player;
+   toPlayer: Int16Array;
++  toPools: Int16Array | null;
+   heard: Int16Array | null;
+   noise: Noise | null;
+   free: (x: number, y: number) => boolean;
+@@ -96,6 +107,7 @@ export interface EnemyContext {
+   bite: (enemy: Enemy) => void;
+   wander: (enemy: Enemy, allowed?: (x: number, y: number) => boolean) => void;
+   isLit: (x: number, y: number, margin?: number) => boolean;
++  litByLantern: (x: number, y: number, margin?: number) => boolean;
+   radius: number;
+   getFlee: () => Float32Array;
+ }
+@@ -145,7 +157,9 @@ export interface RunState {
+   enemies: Enemy[];
+   items: Item[];
+   seen: Uint8Array;
+-  visible: Uint8Array;
++  visible: Uint8Array; // lit by anything: the lantern or a pool
++  lanternView: Uint8Array; // lit by the lantern alone
++  pools: Pool[];
+   turn: number;
+   kills: number;
+   score: number;
+
+diff --git a/src/core/config.ts b/src/core/config.ts
+index facf097..47b70ce 100644
+--- a/src/core/config.ts
++++ b/src/core/config.ts
+@@ -25,6 +25,14 @@ export const SHADE_FEAR_MARGIN = 2;
+ 
+ export const NOISE = { move: 5, attack: 7 } as const; // how far (in walking steps) a sound carries
  
 +// Pouring oil: a burning pool that lights the floor around it for a while.
 +export const POUR = {
@@ -12,143 +72,26 @@ index e369096..d282980 100644
 +  radius: 3,
 +  turns: 25,
 +  max: 3, // pools burning at once; a fourth replaces the oldest
-+};
++} as const;
 +
  export const MOTH_SIGHT_BONUS = 4; // moths notice a lantern this many tiles beyond its radius
  export const SHADE_HUNT_RANGE = 12; // path distance at which a shade starts stalking
-diff --git a/src/main.js b/src/main.js
-index 670586d..d7d5b2f 100644
---- a/src/main.js
-+++ b/src/main.js
-@@ -13,6 +13,7 @@ const MOVE_KEYS = {
-   ArrowRight: [1, 0], KeyD: [1, 0], KeyL: [1, 0], Numpad6: [1, 0],
- };
- const WAIT_KEYS = new Set(['Space', 'Period', 'KeyZ', 'Numpad5']);
-+const POUR_KEYS = new Set(['KeyX', 'KeyE']);
- const STEP_MS = 85; // fastest a held key or pad direction repeats a move
- 
- class Game {
-@@ -72,6 +73,7 @@ class Game {
-     }
-     if (MOVE_KEYS[e.code]) this.request({ type: 'move', dx: MOVE_KEYS[e.code][0], dy: MOVE_KEYS[e.code][1] }, e.repeat);
-     else if (WAIT_KEYS.has(e.code)) this.request({ type: 'wait' }, e.repeat);
-+    else if (POUR_KEYS.has(e.code) && !e.repeat) this.request({ type: 'pour' });
-   }
- 
-   onPointer(e) {
-@@ -127,6 +129,7 @@ class Game {
-       this.padHeld = false;
-       this.padNext = 0;
-       if (edge(0)) this.request({ type: 'wait' });
-+      if (edge(1)) this.request({ type: 'pour' });
-     }
-     this.padPrev = b;
-   }
-@@ -186,6 +189,8 @@ class Game {
-           else { this.sfx.bandage(); this.floater(...at(ev.x, ev.y), '+2', COLORS.blood); }
-           break;
-         case 'alert': this.sfx.alert(); break;
-+        case 'pour': this.sfx.oil(); this.sfx.dark(); this.burst(...at(ev.x, ev.y), 10, COLORS.amber); break;
-+        case 'cant': this.sfx.bump(); this.floater(...at(s.player.x, s.player.y), ev.reason, COLORS.dim); break;
-         case 'dark': this.sfx.dark(); v.shake = 3; break;
-         case 'floor': this.sfx.descend(); v.fade = 1; break;
-         case 'die': this.sfx.die(); v.shake = 10; break;
-diff --git a/src/render.js b/src/render.js
-index 589020c..1d40e45 100644
---- a/src/render.js
-+++ b/src/render.js
-@@ -1,7 +1,7 @@
- // Drawing only. Reads the rules state plus a small "view" of tweened positions and effects;
- // never changes the rules state.
- 
--import { MAP_W, MAP_H, TILE, OIL } from './config.js';
-+import { MAP_W, MAP_H, TILE, OIL, POUR } from './config.js';
- import { idx } from './grid.js';
- import { radius, isLit } from './rules.js';
- 
-@@ -67,8 +67,9 @@ export function drawWorld(ctx, s, v, time) {
-       const sx = x * T;
-       const sy = TOP + y * T;
-       if (s.visible[i]) {
--        const d = Math.hypot(x - px, y - py) / (r + 0.6);
--        const b = Math.max(0.12, Math.min(1, 1 - Math.pow(d, 1.5) + flick));
-+        let b = s.lanternView[i] ? 1 - Math.pow(Math.hypot(x - px, y - py) / (r + 0.6), 1.5) : 0;
-+        for (const q of s.pools) if (q.fov && q.fov[i]) b = Math.max(b, 0.85 - Math.pow(Math.hypot(x - q.x, y - q.y) / (POUR.radius + 0.6), 1.5));
-+        b = Math.max(0.12, Math.min(1, b + flick));
-         if (t === TILE.WALL) {
-           ctx.fillStyle = rgb(mix(WALL_DARK, WALL_LIT, b));
-           ctx.fillRect(sx, sy, T, T);
-@@ -95,6 +96,7 @@ export function drawWorld(ctx, s, v, time) {
-   }
- 
-   for (const it of s.items) if (s.visible[idx(it.x, it.y)]) drawItem(ctx, it, time);
-+  for (const q of s.pools) drawPool(ctx, q, time);
- 
-   for (const e of s.enemies) {
-     const ev = v.ents.get(e.id) || { x: e.x, y: e.y, flash: 0 };
-@@ -128,6 +130,32 @@ export function drawWorld(ctx, s, v, time) {
-   }
- }
- 
-+function drawPool(ctx, q, time) {
-+  const cx = q.x * T + T / 2;
-+  const cy = TOP + q.y * T + T / 2;
-+  const fade = Math.min(1, q.ttl / 6); // gutters in its last few turns
-+  ctx.save();
-+  ctx.globalCompositeOperation = 'lighter';
-+  const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, (POUR.radius + 0.5) * T);
-+  g.addColorStop(0, `rgba(255,150,60,${0.22 * fade})`);
-+  g.addColorStop(1, 'rgba(255,120,40,0)');
-+  ctx.fillStyle = g;
-+  ctx.fillRect(cx - 4 * T, cy - 4 * T, 8 * T, 8 * T);
-+  ctx.restore();
-+  ctx.fillStyle = `rgba(40,24,10,0.8)`;
-+  ctx.beginPath();
-+  ctx.ellipse(cx, cy + 5, 9, 4, 0, 0, TAU);
-+  ctx.fill();
-+  for (let k = -1; k <= 1; k++) {
-+    const h = (6 + Math.sin(time * 13 + k * 2) * 2) * fade;
-+    ctx.fillStyle = k === 0 ? '#ffcf7a' : '#f2a541';
-+    ctx.beginPath();
-+    ctx.moveTo(cx + k * 4 - 2, cy + 5);
-+    ctx.quadraticCurveTo(cx + k * 4, cy + 5 - h * 2, cx + k * 4 + 2, cy + 5);
-+    ctx.fill();
-+  }
-+}
-+
- function drawStairs(ctx, sx, sy, b) {
-   ctx.fillStyle = `rgba(10,8,12,${0.55 + 0.35 * (1 - b)})`;
-   ctx.fillRect(sx + 3, sy + 3, T - 6, T - 6);
-@@ -269,6 +297,7 @@ export function drawHud(ctx, s, best) {
-   ctx.fillStyle = grad;
-   ctx.fillRect(ox + 30, 12, 150 * k, 12);
-   text(ctx, `${s.player.oil}`, ox + 188, 18, { size: 12, color: s.player.oil > 20 ? C.text : C.blood, weight: 'bold' });
-+  text(ctx, `X pour ${POUR.cost}`, ox + 222, 18, { size: 11, color: s.player.oil > POUR.cost ? C.dim : '#3d3530' });
- 
-   text(ctx, `FLOOR ${s.depth}`, W / 2, 18, { size: 13, align: 'center', weight: 'bold', color: C.text });
- 
-@@ -314,6 +343,7 @@ export function drawTitle(ctx, time, best) {
-     ['move', 'arrows · WASD · d-pad · tap'],
-     ['wait', 'space · . · Z · pad A'],
-     ['attack', 'walk into it'],
-+    ['pour oil', 'X · E · B'],
-     ['mute', 'M'],
-   ];
-   rows.forEach(([k, v], i) => {
-diff --git a/src/rules.js b/src/rules.js
-index 102ba89..5f3f4a0 100644
---- a/src/rules.js
-+++ b/src/rules.js
-@@ -2,7 +2,7 @@
- // `act(state, action)` advances it by one player turn. The browser layer reads `state.events`
+ export const RESIN_TURNS = 30; // turns of +2 light radius from a resin pickup
+
+diff --git a/src/core/rules.ts b/src/core/rules.ts
+index 957a051..4422fcf 100644
+--- a/src/core/rules.ts
++++ b/src/core/rules.ts
+@@ -3,7 +3,7 @@
  // after each turn to animate and play sound; tests call the same functions directly.
+ // Enemy and item behaviour comes from the content registry, so adding content never edits this file.
  
--import { MAP_W, MAP_H, TILE, PLAYER, OIL, ENEMY, NOISE, lightRadius, SHADE_FEAR_MARGIN, MOTH_SIGHT_BONUS, SHADE_HUNT_RANGE } from './config.js';
-+import { MAP_W, MAP_H, TILE, PLAYER, OIL, ENEMY, NOISE, POUR, lightRadius, SHADE_FEAR_MARGIN, MOTH_SIGHT_BONUS, SHADE_HUNT_RANGE } from './config.js';
- import { Rng } from './rng.js';
- import { idx, walkable, parseMap, DIRS4 } from './grid.js';
- import { generateFloor } from './gen.js';
-@@ -22,7 +22,9 @@ export function createRun(seed, { generate = true } = {}) {
+-import { MAP_W, MAP_H, TILE, PLAYER, OIL, NOISE, lightRadius } from './config.ts';
++import { MAP_W, MAP_H, TILE, PLAYER, OIL, NOISE, POUR, lightRadius } from './config.ts';
+ import { Rng } from './rng.ts';
+ import { idx, walkable, parseMap, DIRS4 } from './grid.ts';
+ import { generateFloor } from './gen.ts';
+@@ -25,7 +25,9 @@ export function createRun(seed: number, { generate = true, content }: { generate
      enemies: [],
      items: [],
      seen: new Uint8Array(N),
@@ -159,7 +102,7 @@ index 102ba89..5f3f4a0 100644
      turn: 0,
      kills: 0,
      score: 0,
-@@ -48,6 +50,7 @@ export function enterFloor(s, depth, floor = generateFloor(depth, s.rng)) {
+@@ -51,6 +53,7 @@ export function enterFloor(s: RunState, depth: number, floor: Floor = generateFl
    s.player.x = floor.start.x;
    s.player.y = floor.start.y;
    s.items = floor.items.map((i) => ({ ...i }));
@@ -167,43 +110,41 @@ index 102ba89..5f3f4a0 100644
    s.enemies = floor.spawns.map((sp) => makeEnemy(s, sp.kind, sp.x, sp.y));
    s.seen.fill(0);
    s.noise = null;
-@@ -79,14 +82,32 @@ export function loadMap(s, rows, { depth = 1 } = {}) {
- export const radius = (s) => lightRadius(s.player.oil);
+@@ -95,14 +98,31 @@ export function loadMap(s: RunState, rows: string[], { depth = 1 }: { depth?: nu
+ export const radius = (s: RunState): number => lightRadius(s.player.oil, s.player.resin > 0 ? 2 : 0);
  
- export function updateVision(s) {
+ export function updateVision(s: RunState): void {
 -  computeFov(s.tiles, s.player.x, s.player.y, radius(s), s.visible);
 +  computeFov(s.tiles, s.player.x, s.player.y, radius(s), s.lanternView);
 +  s.visible.set(s.lanternView);
 +  for (const pool of s.pools) {
-+    pool.fov = computeFov(s.tiles, pool.x, pool.y, POUR.radius, pool.fov || new Uint8Array(N));
++    pool.fov = computeFov(s.tiles, pool.x, pool.y, POUR.radius, pool.fov ?? new Uint8Array(N));
 +    for (let i = 0; i < N; i++) if (pool.fov[i]) s.visible[i] = 1;
 +  }
    for (let i = 0; i < N; i++) if (s.visible[i]) s.seen[i] = 1;
  }
  
--// Is (x, y) lit, within `margin` tiles of the light's edge excluded? Same circle test as the FOV.
-+// Is (x, y) lit by the lantern or a pool, within `margin` tiles of that light's edge excluded?
-+// Same circle test as the FOV, and only where that light actually reaches (not through walls).
- export function isLit(s, x, y, margin = 0) {
+ // Is (x, y) lit, within `margin` tiles of the light's edge excluded? Same circle test as the FOV.
+ export function isLit(s: RunState, x: number, y: number, margin = 0): boolean {
 +  const i = idx(x, y);
-+  const within = (cx, cy, r) => {
++  const within = (cx: number, cy: number, r: number): boolean => {
 +    if (r <= 0) return false;
 +    const dx = x - cx;
 +    const dy = y - cy;
 +    return dx * dx + dy * dy <= r * r + r;
 +  };
 +  if (litByLantern(s, x, y, margin)) return true;
-+  return s.pools.some((q) => q.fov && q.fov[i] && within(q.x, q.y, POUR.radius - margin));
++  return s.pools.some((q) => q.fov !== null && !!q.fov[i] && within(q.x, q.y, POUR.radius - margin));
 +}
 +
-+function litByLantern(s, x, y, margin) {
++function litByLantern(s: RunState, x: number, y: number, margin: number): boolean {
    const r = radius(s) - margin;
 -  if (r <= 0 || !s.visible[idx(x, y)]) return false;
 +  if (r <= 0 || !s.lanternView[idx(x, y)]) return false;
    const dx = x - s.player.x;
    const dy = y - s.player.y;
    return dx * dx + dy * dy <= r * r + r;
-@@ -135,6 +156,18 @@ export function act(s, action) {
+@@ -152,6 +172,18 @@ export function act(s: RunState, action: Action): boolean {
    } else if (action.type === 'wait') {
      s.noise = null;
      s.events.push({ type: 'wait' });
@@ -222,8 +163,8 @@ index 102ba89..5f3f4a0 100644
    } else {
      return false;
    }
-@@ -172,6 +205,11 @@ function strike(s, e) {
- function endTurn(s) {
+@@ -188,6 +220,11 @@ function strike(s: RunState, e: Enemy): void {
+ function endTurn(s: RunState): void {
    const p = s.player;
    s.turn += 1;
 +  for (const q of s.pools) q.ttl -= 1;
@@ -231,66 +172,235 @@ index 102ba89..5f3f4a0 100644
 +    s.pools = s.pools.filter((q) => q.ttl > 0);
 +    s.events.push({ type: 'pool-out' });
 +  }
-   if (s.turn % OIL.burnEvery === 0 && p.oil > 0) {
-     p.oil -= 1;
-     if (p.oil === 0) {
-@@ -191,6 +229,7 @@ function enemiesAct(s) {
+   if (p.resin > 0) {
+     p.resin -= 1;
+     if (p.resin === 0) say(s, 'The resin burns away.');
+@@ -210,6 +247,7 @@ function endTurn(s: RunState): void {
+ function enemiesAct(s: RunState): void {
    const p = s.player;
    const toPlayer = distanceMap(s.tiles, [[p.x, p.y]]);
-   let flee = null; // built lazily: only shades need it
-+  const toPools = s.pools.length ? distanceMap(s.tiles, s.pools.map((q) => [q.x, q.y])) : null;
-   const heard = s.noise ? distanceMap(s.tiles, [[s.noise.x, s.noise.y]]) : null;
++  const toPools: Int16Array | null = s.pools.length ? distanceMap(s.tiles, s.pools.map((q): Cell => [q.x, q.y])) : null;
+   let flee: Float32Array | null = null; // built lazily: only shades need it
+   const getFlee = (): Float32Array => (flee ??= fleeMap(s.tiles, toPlayer));
+   const noise = s.noise;
+@@ -223,6 +261,7 @@ function enemiesAct(s: RunState): void {
+       enemy: e,
+       player: p,
+       toPlayer,
++      toPools,
+       heard,
+       noise,
+       free: freeFn,
+@@ -230,6 +269,7 @@ function enemiesAct(s: RunState): void {
+       bite: (enemy) => bite(s, enemy),
+       wander: (enemy, allowed) => wander(s, enemy, allowed),
+       isLit: (x, y, margin = 0) => isLit(s, x, y, margin),
++      litByLantern: (x, y, margin = 0) => litByLantern(s, x, y, margin),
+       radius: radius(s),
+       getFlee,
+     };
+
+diff --git a/src/content/enemies.ts b/src/content/enemies.ts
+index 94eb849..ac137cd 100644
+--- a/src/content/enemies.ts
++++ b/src/content/enemies.ts
+@@ -1,10 +1,10 @@
+ // Enemy behaviours. Each entry is the complete behaviour plus stats; the core only dispatches
+ // through the registry, so adding an enemy never edits the rules module.
+ 
+-import { LURKER_CALM, LURKER_SIGHT, MOTH_SIGHT_BONUS, SHADE_FEAR_MARGIN, SHADE_HUNT_RANGE } from '../core/config.ts';
++import { LURKER_CALM, LURKER_SIGHT, MOTH_SIGHT_BONUS, POUR, SHADE_FEAR_MARGIN, SHADE_HUNT_RANGE } from '../core/config.ts';
+ import { idx } from '../core/grid.ts';
+-import { distanceMap, downhill } from '../core/path.ts';
+-import type { EnemyContext, EnemyDef, EnemyKind } from '../core/types.ts';
++import { distanceMap, downhill, fleeMap } from '../core/path.ts';
++import type { Cell, EnemyContext, EnemyDef, EnemyKind } from '../core/types.ts';
+ 
+ const adjacent = (ctx: EnemyContext): boolean =>
+   Math.abs(ctx.enemy.x - ctx.player.x) + Math.abs(ctx.enemy.y - ctx.player.y) === 1;
+@@ -20,8 +20,14 @@ const MOTH: EnemyDef = {
+     const d = toPlayer[idx(e.x, e.y)];
+     // Moths fly at a burning lantern they can see from a little beyond its glow, erratically.
+     const drawn = p.oil > 0 && d >= 0 && d <= ctx.radius + MOTH_SIGHT_BONUS;
++    // A burning pool pulls harder than a lantern farther away (or a dry one).
++    const pd = ctx.toPools ? ctx.toPools[idx(e.x, e.y)] : -1;
++    const toPool = pd >= 0 && pd <= POUR.radius + MOTH_SIGHT_BONUS && (!drawn || pd < d);
+     if (adjacent(ctx)) ctx.bite(e);
+-    else if (drawn && !s.rng.chance(0.25)) ctx.step(e, downhill(toPlayer, s.tiles, e.x, e.y, ctx.free));
++    else if (toPool && ctx.toPools) {
++      if (pd <= 1 || s.rng.chance(0.25)) ctx.wander(e); // circling the flame
++      else ctx.step(e, downhill(ctx.toPools, s.tiles, e.x, e.y, ctx.free));
++    } else if (drawn && !s.rng.chance(0.25)) ctx.step(e, downhill(toPlayer, s.tiles, e.x, e.y, ctx.free));
+     else if (s.rng.chance(drawn ? 1 : 0.5)) ctx.wander(e);
+   },
+ };
+@@ -33,19 +39,31 @@ const SHADE: EnemyDef = {
+   cost: 3,
+   points: 15,
+   act(ctx: EnemyContext): void {
+-    const { state: s, enemy: e, toPlayer } = ctx;
++    const { state: s, enemy: e, player: p, toPlayer } = ctx;
+     const d = toPlayer[idx(e.x, e.y)];
+     // Shades can't stand the bright core of the light. They flee it, stalk just outside it,
+     // and only reach you once the lantern is dry.
+     if (ctx.isLit(e.x, e.y, SHADE_FEAR_MARGIN)) {
+-      ctx.step(e, downhill(ctx.getFlee(), s.tiles, e.x, e.y, ctx.free));
++      // Flee only the lights actually burning it: running from the lantern straight into a pool
++      // (or the other way round) would keep it in the light.
++      let map: Int16Array | Float32Array;
++      if (!ctx.toPools) {
++        map = ctx.getFlee();
++      } else {
++        const sources: Cell[] = s.pools
++          .filter((q) => q.fov !== null && !!q.fov[idx(e.x, e.y)] && (e.x - q.x) ** 2 + (e.y - q.y) ** 2 <= 2)
++          .map((q): Cell => [q.x, q.y]);
++        if (ctx.litByLantern(e.x, e.y, SHADE_FEAR_MARGIN)) sources.push([p.x, p.y]);
++        map = fleeMap(s.tiles, distanceMap(s.tiles, sources));
++      }
++      ctx.step(e, downhill(map, s.tiles, e.x, e.y, ctx.free));
+     } else if (adjacent(ctx)) {
+       ctx.bite(e);
+     } else if (d >= 0 && d <= SHADE_HUNT_RANGE) {
+       const next = downhill(toPlayer, s.tiles, e.x, e.y, ctx.free);
+       if (next && !ctx.isLit(next[0], next[1], SHADE_FEAR_MARGIN)) ctx.step(e, next);
+     } else if (s.rng.chance(0.3)) {
+-      ctx.wander(e);
++      ctx.wander(e, (x, y) => !ctx.isLit(x, y, SHADE_FEAR_MARGIN)); // never drift into a pool's core
+     }
+   },
+ };
+
+diff --git a/src/presentation/render.ts b/src/presentation/render.ts
+index f99da64..3644c3b 100644
+--- a/src/presentation/render.ts
++++ b/src/presentation/render.ts
+@@ -1,10 +1,10 @@
+ // Drawing only. Reads the rules state plus a small "view" of tweened positions and effects;
+ // never changes the rules state.
+ 
+-import { MAP_W, MAP_H, TILE, OIL } from '../core/config.ts';
++import { MAP_W, MAP_H, TILE, OIL, POUR } from '../core/config.ts';
+ import { idx } from '../core/grid.ts';
+ import { radius, isLit } from '../core/rules.ts';
+-import type { Best, Enemy, Item, RunState } from '../core/types.ts';
++import type { Best, Enemy, Item, Pool, RunState } from '../core/types.ts';
+ 
+ export const W = 960;
+ export const H = 540;
+@@ -146,8 +146,9 @@ export function drawWorld(ctx: CanvasRenderingContext2D, s: RunState, v: View, t
+       const sx = x * T;
+       const sy = TOP + y * T;
+       if (s.visible[i]) {
+-        const d = Math.hypot(x - px, y - py) / (r + 0.6);
+-        const b = Math.max(0.12, Math.min(1, 1 - Math.pow(d, 1.5) + flick));
++        let b = s.lanternView[i] ? 1 - Math.pow(Math.hypot(x - px, y - py) / (r + 0.6), 1.5) : 0;
++        for (const q of s.pools) if (q.fov && q.fov[i]) b = Math.max(b, 0.85 - Math.pow(Math.hypot(x - q.x, y - q.y) / (POUR.radius + 0.6), 1.5));
++        b = Math.max(0.12, Math.min(1, b + flick));
+         if (t === TILE.WALL) {
+           ctx.fillStyle = rgb(mix(WALL_DARK, WALL_LIT, b));
+           ctx.fillRect(sx, sy, T, T);
+@@ -174,6 +175,7 @@ export function drawWorld(ctx: CanvasRenderingContext2D, s: RunState, v: View, t
+   }
+ 
+   for (const it of s.items) if (s.visible[idx(it.x, it.y)]) drawItem(ctx, it, time);
++  for (const q of s.pools) drawPool(ctx, q, time);
  
    for (const e of s.enemies) {
-@@ -201,22 +240,37 @@ function enemiesAct(s) {
-     if (e.kind === 'moth') {
-       // Moths fly at a burning lantern they can see from a little beyond its glow, erratically.
-       const drawn = p.oil > 0 && d >= 0 && d <= radius(s) + MOTH_SIGHT_BONUS;
-+      // A burning pool pulls harder than a lantern farther away (or a dry one).
-+      const pd = toPools ? toPools[idx(e.x, e.y)] : -1;
-+      const toPool = pd >= 0 && pd <= POUR.radius + MOTH_SIGHT_BONUS && (!drawn || pd < d);
-       if (adjacent) bite(s, e);
-+      else if (toPool) {
-+        if (pd <= 1 || s.rng.chance(0.25)) wander(s, e); // circling the flame
-+        else step(s, e, downhill(toPools, s.tiles, e.x, e.y, free(s)));
-+      }
-       else if (drawn && !s.rng.chance(0.25)) step(s, e, downhill(toPlayer, s.tiles, e.x, e.y, free(s)));
-       else if (s.rng.chance(drawn ? 1 : 0.5)) wander(s, e);
-     } else if (e.kind === 'shade') {
-       // Shades can't stand the bright core of the light. They flee it, stalk just outside it,
-       // and only reach you once the lantern is dry.
-       if (isLit(s, e.x, e.y, SHADE_FEAR_MARGIN)) {
--        flee ??= fleeMap(s.tiles, toPlayer);
--        step(s, e, downhill(flee, s.tiles, e.x, e.y, free(s)));
-+        // Flee only the lights actually burning it: running from the lantern straight into a pool
-+        // (or the other way round) would keep it in the light.
-+        let map = null;
-+        if (!toPools) map = flee ??= fleeMap(s.tiles, toPlayer);
-+        else {
-+          const sources = s.pools.filter((q) => q.fov && q.fov[idx(e.x, e.y)] && (e.x - q.x) ** 2 + (e.y - q.y) ** 2 <= 2).map((q) => [q.x, q.y]);
-+          if (litByLantern(s, e.x, e.y, SHADE_FEAR_MARGIN)) sources.push([p.x, p.y]);
-+          map = fleeMap(s.tiles, distanceMap(s.tiles, sources));
-+        }
-+        step(s, e, downhill(map, s.tiles, e.x, e.y, free(s)));
-       } else if (adjacent) {
-         bite(s, e);
-       } else if (d >= 0 && d <= SHADE_HUNT_RANGE) {
-         const next = downhill(toPlayer, s.tiles, e.x, e.y, free(s));
-         if (next && !isLit(s, next[0], next[1], SHADE_FEAR_MARGIN)) step(s, e, next);
-       } else if (s.rng.chance(0.3)) {
--        wander(s, e);
-+        wander(s, e, (x, y) => !isLit(s, x, y, SHADE_FEAR_MARGIN)); // never drift into a pool's core
-       }
-     } else if (e.kind === 'hound') {
-       // Hounds hunt by sound. A noise reaches a hound if it's within the noise's range measured
-@@ -248,8 +302,8 @@ function step(s, e, to) {
-   e.y = to[1];
+     const ev = v.ents.get(e.id) ?? { x: e.x, y: e.y, flash: 0 };
+@@ -207,6 +209,32 @@ export function drawWorld(ctx: CanvasRenderingContext2D, s: RunState, v: View, t
+   }
  }
  
--function wander(s, e) {
--  const options = DIRS4.map(([dx, dy]) => [e.x + dx, e.y + dy]).filter(([x, y]) => walkable(s.tiles, x, y) && free(s)(x, y));
-+function wander(s, e, allowed = () => true) {
-+  const options = DIRS4.map(([dx, dy]) => [e.x + dx, e.y + dy]).filter(([x, y]) => walkable(s.tiles, x, y) && free(s)(x, y) && allowed(x, y));
-   if (options.length) step(s, e, s.rng.pick(options));
- }
++function drawPool(ctx: CanvasRenderingContext2D, q: Pool, time: number): void {
++  const cx = q.x * T + T / 2;
++  const cy = TOP + q.y * T + T / 2;
++  const fade = Math.min(1, q.ttl / 6); // gutters in its last few turns
++  ctx.save();
++  ctx.globalCompositeOperation = 'lighter';
++  const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, (POUR.radius + 0.5) * T);
++  g.addColorStop(0, `rgba(255,150,60,${0.22 * fade})`);
++  g.addColorStop(1, 'rgba(255,120,40,0)');
++  ctx.fillStyle = g;
++  ctx.fillRect(cx - 4 * T, cy - 4 * T, 8 * T, 8 * T);
++  ctx.restore();
++  ctx.fillStyle = 'rgba(40,24,10,0.8)';
++  ctx.beginPath();
++  ctx.ellipse(cx, cy + 5, 9, 4, 0, 0, TAU);
++  ctx.fill();
++  for (let k = -1; k <= 1; k++) {
++    const h = (6 + Math.sin(time * 13 + k * 2) * 2) * fade;
++    ctx.fillStyle = k === 0 ? '#ffcf7a' : '#f2a541';
++    ctx.beginPath();
++    ctx.moveTo(cx + k * 4 - 2, cy + 5);
++    ctx.quadraticCurveTo(cx + k * 4, cy + 5 - h * 2, cx + k * 4 + 2, cy + 5);
++    ctx.fill();
++  }
++}
++
+ function drawStairs(ctx: CanvasRenderingContext2D, sx: number, sy: number, b: number): void {
+   ctx.fillStyle = `rgba(10,8,12,${0.55 + 0.35 * (1 - b)})`;
+   ctx.fillRect(sx + 3, sy + 3, T - 6, T - 6);
+@@ -348,6 +376,7 @@ export function drawHud(ctx: CanvasRenderingContext2D, s: RunState, best: Best):
+   ctx.fillStyle = grad;
+   ctx.fillRect(ox + 30, 12, 150 * k, 12);
+   text(ctx, `${s.player.oil}`, ox + 188, 18, { size: 12, color: s.player.oil > 20 ? C.text : C.blood, weight: 'bold' });
++  text(ctx, `X pour ${POUR.cost}`, ox + 222, 18, { size: 11, color: s.player.oil > POUR.cost ? C.dim : '#3d3530' });
+   if (s.player.resin > 0) text(ctx, `RESIN ${s.player.resin}`, ox + 222, 18, { size: 11, color: C.amber });
  
+   text(ctx, `FLOOR ${s.depth}`, W / 2, 18, { size: 13, align: 'center', weight: 'bold', color: C.text });
+@@ -394,6 +423,7 @@ export function drawTitle(ctx: CanvasRenderingContext2D, time: number, best: Bes
+     ['move', 'arrows · WASD · d-pad · tap'],
+     ['wait', 'space · . · Z · pad A'],
+     ['attack', 'walk into it'],
++    ['pour oil', 'X · E · B'],
+     ['mute', 'M'],
+   ];
+   rows.forEach(([k, v], i) => {
+
+diff --git a/src/main.ts b/src/main.ts
+index 0ec970c..bef6e70 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -21,6 +21,7 @@ const MOVE_KEYS: Record<string, Cell> = {
+   ArrowRight: [1, 0], KeyD: [1, 0], KeyL: [1, 0], Numpad6: [1, 0],
+ };
+ const WAIT_KEYS = new Set(['Space', 'Period', 'KeyZ', 'Numpad5']);
++const POUR_KEYS = new Set(['KeyX', 'KeyE']);
+ const STEP_MS = 85; // fastest a held key or pad direction repeats a move
+ 
+ type Screen = 'title' | 'play' | 'over';
+@@ -138,6 +139,8 @@ class Game {
+       items: save.items.map((i) => ({ ...i })),
+       seen: new Uint8Array(save.seen),
+       visible: new Uint8Array(save.tiles.length),
++      lanternView: new Uint8Array(save.tiles.length),
++      pools: [],
+       turn: save.turn,
+       kills: save.kills,
+       score: save.score,
+@@ -287,6 +290,7 @@ class Game {
+     }
+     if (move) this.request({ type: 'move', dx: move[0], dy: move[1] }, e.repeat);
+     else if (WAIT_KEYS.has(e.code)) this.request({ type: 'wait' }, e.repeat);
++    else if (POUR_KEYS.has(e.code) && !e.repeat) this.request({ type: 'pour' });
+   }
+ 
+   onPointer(e: PointerEvent): void {
+@@ -366,6 +370,7 @@ class Game {
+       this.padHeld = false;
+       this.padNext = 0;
+       if (edge(0)) this.request({ type: 'wait' });
++      if (edge(1)) this.request({ type: 'pour' });
+     }
+     this.padPrev = b;
+   }
+@@ -435,6 +440,8 @@ class Game {
+           else { this.sfx.oil(); this.floater(...at(ev.x, ev.y), '+resin', COLORS.amber); }
+           break;
+         case 'alert': this.sfx.alert(); break;
++        case 'pour': this.sfx.oil(); this.sfx.dark(); this.burst(...at(ev.x, ev.y), 10, COLORS.amber); break;
++        case 'cant': this.sfx.bump(); this.floater(...at(s.player.x, s.player.y), ev.reason, COLORS.dim); break;
+         case 'dark': this.sfx.dark(); v.shake = 3 * shake; break;
+         case 'floor': this.sfx.descend(); v.fade = 1; this.menus.announce(`Floor ${ev.depth}`); break;
+         case 'die': this.sfx.die(); v.shake = 10 * shake; break;
+

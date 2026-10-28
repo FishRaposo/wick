@@ -1,8 +1,9 @@
 // Criteria: footsteps carry 5 steps *along walkable tiles*. A hound behind solid rock, close in a
 // straight line but far by any path, stays asleep; a hound within 5 steps of open floor wakes.
 export default async function check(src) {
-  const { createRun, loadMap, act } = await import(src + 'rules.js');
-  const { MAP_W, MAP_H } = await import(src + 'config.js');
+  const { CONTENT } = await import(src + 'content/index.js');
+  const { createRun, loadMap, act } = await import(src + 'core/rules.js');
+  const { MAP_W, MAP_H } = await import(src + 'core/config.js');
   const room = () => {
     const rows = [];
     for (let y = 0; y < MAP_H; y++) {
@@ -19,7 +20,7 @@ export default async function check(src) {
   for (let y = 1; y < MAP_H - 2; y++) put(rock, 8, y, '#');
   put(rock, 6, 10, '@');
   put(rock, 10, 10, 'h');
-  const a = createRun(1, { generate: false });
+  const a = createRun(1, { generate: false, content: CONTENT });
   loadMap(a, rock);
   act(a, { type: 'move', dx: 0, dy: -1 });
   const woke = !!a.enemies[0].target;
@@ -28,7 +29,7 @@ export default async function check(src) {
   const open = room();
   put(open, 6, 10, '@');
   put(open, 10, 10, 'h');
-  const b = createRun(1, { generate: false });
+  const b = createRun(1, { generate: false, content: CONTENT });
   loadMap(b, open);
   act(b, { type: 'move', dx: 0, dy: -1 });
   const heard = !!b.enemies[0].target;

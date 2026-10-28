@@ -1,8 +1,9 @@
 // Criteria for pouring oil. Everything is checked through the rules, with the player's real action.
 export default async function check(src) {
-  const { createRun, loadMap, act, isLit } = await import(src + 'rules.js');
-  const { MAP_W, MAP_H } = await import(src + 'config.js');
-  const { idx } = await import(src + 'grid.js');
+  const { CONTENT } = await import(src + 'content/index.js');
+  const { createRun, loadMap, act, isLit } = await import(src + 'core/rules.js');
+  const { MAP_W, MAP_H } = await import(src + 'core/config.js');
+  const { idx } = await import(src + 'core/grid.js');
   const room = (marks = {}) => {
     const rows = [];
     for (let y = 0; y < MAP_H; y++) {
@@ -17,7 +18,7 @@ export default async function check(src) {
   const fail = [];
 
   // 1. Pouring costs 15 oil and a turn, and leaves a pool that lights its surroundings after you walk away.
-  const s = createRun(1, { generate: false });
+  const s = createRun(1, { generate: false, content: CONTENT });
   loadMap(s, room({ '10,10': '@' }));
   s.player.oil = 40; // lantern radius 4
   const turned = act(s, POUR);
@@ -32,7 +33,7 @@ export default async function check(src) {
   if (s.visible[idx(10, 10)]) fail.push('pool still lit 28 turns after pouring (want out after 25)');
 
   // 3. Refusals cost nothing: not enough oil, or the same tile twice.
-  const r = createRun(1, { generate: false });
+  const r = createRun(1, { generate: false, content: CONTENT });
   loadMap(r, room({ '5,5': '@' }));
   r.player.oil = 15;
   const refused = act(r, POUR) === false && r.player.oil === 15 && r.turn === 0;
@@ -43,7 +44,7 @@ export default async function check(src) {
   if (!twice) fail.push('pouring twice on one tile should be refused for free');
 
   // 4. Shades fear the pool on their own: pour beside a shade, then take the lantern away entirely.
-  const sh = createRun(2, { generate: false });
+  const sh = createRun(2, { generate: false, content: CONTENT });
   loadMap(sh, room({ '20,10': '@', '5,10': 's' }));
   sh.player.oil = 60;
   sh.player.x = 6;
@@ -56,7 +57,7 @@ export default async function check(src) {
   if (d2 <= 2) fail.push(`shade stayed in the pool's bright core at ${shade.x},${shade.y}`);
 
   // 5. Moths go to a pool that is closer than the lantern.
-  const m = createRun(3, { generate: false });
+  const m = createRun(3, { generate: false, content: CONTENT });
   loadMap(m, room({ '30,10': '@', '20,10': 'm' }));
   m.player.oil = 60;
   m.player.x = 17;

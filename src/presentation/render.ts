@@ -1,9 +1,10 @@
 // Drawing only. Reads the rules state plus a small "view" of tweened positions and effects;
 // never changes the rules state.
 
-import { MAP_W, MAP_H, TILE, OIL } from './config.js';
-import { idx } from './grid.js';
-import { radius, isLit } from './rules.js';
+import { MAP_W, MAP_H, TILE, OIL } from '../core/config.ts';
+import { idx } from '../core/grid.ts';
+import { radius, isLit } from '../core/rules.ts';
+import type { Best, Enemy, Item, RunState } from '../core/types.ts';
 
 export const W = 960;
 export const H = 540;
@@ -14,7 +15,7 @@ const TAU = Math.PI * 2;
 export const FONT = {
   serif: '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif',
   mono: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-};
+} as const;
 
 const C = {
   void: '#07070a',
@@ -27,10 +28,73 @@ const C = {
   blood: '#c8402c',
   text: '#e8dcc4',
   dim: '#7d7466',
-};
+} as const;
 
-const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
-const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+export interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  max: number;
+  size: number;
+  color: string;
+  drag: number;
+}
+
+export interface Floater {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  life: number;
+  max: number;
+}
+
+export interface EntView {
+  x: number;
+  y: number;
+  flash: number;
+}
+
+export interface View {
+  player: { x: number; y: number };
+  ents: Map<number, EntView>;
+  particles: Particle[];
+  floaters: Floater[];
+  hurtFlash: number;
+  shake: number;
+  fade: number;
+}
+
+export interface TextOptions {
+  size?: number;
+  font?: string;
+  color?: string;
+  align?: CanvasTextAlign;
+  baseline?: CanvasTextBaseline;
+  weight?: string;
+  style?: string;
+  alpha?: number;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export const TITLE_SETTINGS: Rect = { x: W - 118, y: 18, w: 96, h: 30 };
+export const TITLE_CONTINUE: Rect = { x: W / 2 - 150, y: 498, w: 300, h: 28 };
+
+export interface TitleUi {
+  seed: number;
+  saveLabel: string | null;
+}
+
+const mix = (a: readonly number[], b: readonly number[], t: number): number[] => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const rgb = (c: readonly number[]): string => `rgb(${c[0]},${c[1]},${c[2]})`;
 const FLOOR_DARK = [22, 19, 24];
 const FLOOR_LIT = [112, 84, 54];
 const WALL_DARK = [34, 28, 34];
@@ -39,7 +103,13 @@ const WALL_LIT = [176, 136, 88];
 // A fixed per-tile speck pattern so floors aren't flat.
 const speck = new Float32Array(MAP_W * MAP_H).map((_, i) => ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1);
 
-export function text(ctx, str, x, y, { size = 14, font = FONT.mono, color = C.text, align = 'left', baseline = 'middle', weight = '', style = '', alpha = 1 } = {}) {
+export function text(
+  ctx: CanvasRenderingContext2D,
+  str: string,
+  x: number,
+  y: number,
+  { size = 14, font = FONT.mono, color = C.text, align = 'left', baseline = 'middle', weight = '', style = '', alpha = 1 }: TextOptions = {},
+): void {
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.font = `${style} ${weight} ${size}px ${font}`;
@@ -50,7 +120,16 @@ export function text(ctx, str, x, y, { size = 14, font = FONT.mono, color = C.te
   ctx.restore();
 }
 
-export function drawWorld(ctx, s, v, time) {
+function drawUiButton(ctx: CanvasRenderingContext2D, r: Rect, label: string, active = false): void {
+  ctx.fillStyle = active ? '#1d1920' : 'rgba(18,16,22,0.85)';
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = active ? C.amber : 'rgba(125,102,72,0.6)';
+  ctx.lineWidth = active ? 2 : 1;
+  ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  text(ctx, label, r.x + r.w / 2, r.y + r.h / 2 + 1, { size: 12, align: 'center', color: active ? C.ember : C.dim });
+}
+
+export function drawWorld(ctx: CanvasRenderingContext2D, s: RunState, v: View, time: number): void {
   const r = radius(s);
   const flick = 0.04 * Math.sin(time * 9.1) + 0.03 * Math.sin(time * 23.7);
   const px = v.player.x;
@@ -97,7 +176,7 @@ export function drawWorld(ctx, s, v, time) {
   for (const it of s.items) if (s.visible[idx(it.x, it.y)]) drawItem(ctx, it, time);
 
   for (const e of s.enemies) {
-    const ev = v.ents.get(e.id) || { x: e.x, y: e.y, flash: 0 };
+    const ev = v.ents.get(e.id) ?? { x: e.x, y: e.y, flash: 0 };
     if (s.visible[idx(e.x, e.y)]) drawEnemy(ctx, e, ev, time);
     else if (e.kind === 'shade' && s.seen[idx(e.x, e.y)] && Math.hypot(e.x - px, e.y - py) <= r + 3) drawShadeEyes(ctx, ev, time);
   }
@@ -128,14 +207,14 @@ export function drawWorld(ctx, s, v, time) {
   }
 }
 
-function drawStairs(ctx, sx, sy, b) {
+function drawStairs(ctx: CanvasRenderingContext2D, sx: number, sy: number, b: number): void {
   ctx.fillStyle = `rgba(10,8,12,${0.55 + 0.35 * (1 - b)})`;
   ctx.fillRect(sx + 3, sy + 3, T - 6, T - 6);
   ctx.fillStyle = `rgba(232,220,196,${0.25 + 0.5 * b})`;
   for (let k = 0; k < 3; k++) ctx.fillRect(sx + 5 + k * 3, sy + 6 + k * 4, T - 10 - k * 6, 2);
 }
 
-function drawItem(ctx, it, time) {
+function drawItem(ctx: CanvasRenderingContext2D, it: Item, time: number): void {
   const cx = it.x * T + T / 2;
   const cy = TOP + it.y * T + T / 2 + Math.sin(time * 3 + it.x) * 1.2;
   if (it.kind === 'oil') {
@@ -155,7 +234,7 @@ function drawItem(ctx, it, time) {
   }
 }
 
-function drawEnemy(ctx, e, ev, time) {
+function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, ev: EntView, time: number): void {
   const cx = ev.x * T + T / 2;
   const cy = TOP + ev.y * T + T / 2;
   const flash = ev.flash > 0;
@@ -164,9 +243,9 @@ function drawEnemy(ctx, e, ev, time) {
   if (e.kind === 'moth') {
     const flap = Math.abs(Math.sin(time * 18 + e.id)) * 0.8 + 0.2;
     ctx.fillStyle = flash ? '#fff' : '#d8cfb8';
-    for (const s of [-1, 1]) {
+    for (const side of [-1, 1]) {
       ctx.beginPath();
-      ctx.ellipse(s * 5 * flap, -1, 5 * flap, 6, s * 0.4, 0, TAU);
+      ctx.ellipse(side * 5 * flap, -1, 5 * flap, 6, side * 0.4, 0, TAU);
       ctx.fill();
     }
     ctx.fillStyle = '#5a4c3a';
@@ -209,7 +288,7 @@ function drawEnemy(ctx, e, ev, time) {
   }
 }
 
-function drawShadeEyes(ctx, ev, time) {
+function drawShadeEyes(ctx: CanvasRenderingContext2D, ev: EntView, time: number): void {
   const cx = ev.x * T + T / 2;
   const cy = TOP + ev.y * T + T / 2;
   const blink = Math.sin(time * 1.7 + ev.x * 3) > 0.92 ? 0.1 : 0.85;
@@ -218,7 +297,7 @@ function drawShadeEyes(ctx, ev, time) {
   ctx.fillRect(cx + 2, cy - 4, 2, 2);
 }
 
-function drawPlayer(ctx, s, v, time) {
+function drawPlayer(ctx: CanvasRenderingContext2D, s: RunState, v: View, time: number): void {
   const cx = v.player.x * T + T / 2;
   const cy = TOP + v.player.y * T + T / 2;
   const alive = !s.over;
@@ -245,7 +324,7 @@ function drawPlayer(ctx, s, v, time) {
   ctx.restore();
 }
 
-export function drawHud(ctx, s, best) {
+export function drawHud(ctx: CanvasRenderingContext2D, s: RunState, best: Best): void {
   ctx.fillStyle = C.hud;
   ctx.fillRect(0, 0, W, TOP);
   ctx.fillStyle = 'rgba(242,165,65,0.18)';
@@ -269,6 +348,7 @@ export function drawHud(ctx, s, best) {
   ctx.fillStyle = grad;
   ctx.fillRect(ox + 30, 12, 150 * k, 12);
   text(ctx, `${s.player.oil}`, ox + 188, 18, { size: 12, color: s.player.oil > 20 ? C.text : C.blood, weight: 'bold' });
+  if (s.player.resin > 0) text(ctx, `RESIN ${s.player.resin}`, ox + 222, 18, { size: 11, color: C.amber });
 
   text(ctx, `FLOOR ${s.depth}`, W / 2, 18, { size: 13, align: 'center', weight: 'bold', color: C.text });
 
@@ -276,14 +356,14 @@ export function drawHud(ctx, s, best) {
   if (last) text(ctx, last.text, W - 16, 18, { size: 12, align: 'right', color: s.turn - last.turn <= 1 ? C.text : C.dim, font: FONT.serif, style: 'italic' });
 }
 
-export function drawLog(ctx, s) {
+export function drawLog(ctx: CanvasRenderingContext2D, s: RunState): void {
   const lines = s.log.slice(-3, -1);
   lines.forEach((l, i) => {
     text(ctx, l.text, 12, H - 34 + i * 16, { size: 12, color: C.dim, font: FONT.serif, style: 'italic', alpha: 0.5 + i * 0.25 });
   });
 }
 
-export function drawTitle(ctx, time, best) {
+export function drawTitle(ctx: CanvasRenderingContext2D, time: number, best: Best, ui: TitleUi): void {
   ctx.fillStyle = C.void;
   ctx.fillRect(0, 0, W, H);
   const fx = W / 2;
@@ -310,7 +390,7 @@ export function drawTitle(ctx, time, best) {
 
   text(ctx, 'W I C K', W / 2, 250, { size: 64, align: 'center', font: FONT.serif, weight: 'bold', color: C.text });
   text(ctx, 'the oil is the light. the light is the map.', W / 2, 296, { size: 17, align: 'center', font: FONT.serif, style: 'italic', color: C.dim });
-  const rows = [
+  const rows: [string, string][] = [
     ['move', 'arrows · WASD · d-pad · tap'],
     ['wait', 'space · . · Z · pad A'],
     ['attack', 'walk into it'],
@@ -320,26 +400,31 @@ export function drawTitle(ctx, time, best) {
     text(ctx, k, W / 2 - 12, 346 + i * 22, { size: 12, align: 'right', color: C.dim });
     text(ctx, v, W / 2 + 12, 346 + i * 22, { size: 12, color: C.text });
   });
-  text(ctx, 'press any key to descend', W / 2, 460, { size: 16, align: 'center', font: FONT.serif, style: 'italic', color: C.amber, alpha: 0.55 + 0.45 * Math.sin(time * 3) });
-  if (best.depth > 0) text(ctx, `deepest: floor ${best.depth}  ·  best score ${best.score}`, W / 2, 494, { size: 11, align: 'center', color: C.dim });
+  text(ctx, 'press any key to descend  ·  O settings', W / 2, 452, { size: 15, align: 'center', font: FONT.serif, style: 'italic', color: C.amber, alpha: 0.55 + 0.45 * Math.sin(time * 3) });
+  drawUiButton(ctx, TITLE_SETTINGS, 'settings');
+  if (ui.saveLabel) drawUiButton(ctx, TITLE_CONTINUE, ui.saveLabel, true);
+  text(ctx, `seed ${ui.seed}`, 16, H - 14, { size: 11, color: C.dim, align: 'left' });
+  if (best.depth > 0) text(ctx, `deepest: floor ${best.depth}  ·  best score ${best.score}`, W - 16, H - 14, { size: 11, align: 'right', color: C.dim });
 }
 
-export function drawOver(ctx, s, best, t) {
+export function drawOver(ctx: CanvasRenderingContext2D, s: RunState, best: Best, t: number, seed: number): void {
   ctx.save();
   ctx.globalAlpha = Math.min(1, t * 2) * 0.82;
   ctx.fillStyle = '#050407';
   ctx.fillRect(0, 0, W, H);
   ctx.restore();
   const a = Math.min(1, t * 2);
+  drawUiButton(ctx, TITLE_SETTINGS, 'settings');
   text(ctx, 'the wick burns out.', W / 2, 190, { size: 34, align: 'center', font: FONT.serif, style: 'italic', alpha: a });
   text(ctx, `floor ${s.depth}`, W / 2, 250, { size: 40, align: 'center', weight: 'bold', alpha: a, color: C.amber });
-  const rows = [['score', s.score], ['kills', s.kills], ['turns', s.turn]];
+  const rows: [string, number][] = [['score', s.score], ['kills', s.kills], ['turns', s.turn]];
   rows.forEach(([k, v], i) => {
     text(ctx, k, W / 2 - 10, 300 + i * 20, { size: 12, align: 'right', color: C.dim, alpha: a });
     text(ctx, `${v}`, W / 2 + 10, 300 + i * 20, { size: 12, alpha: a });
   });
   if (s.score >= best.score && s.score > 0) text(ctx, 'best run yet', W / 2, 372, { size: 12, align: 'center', color: C.amber, weight: 'bold', alpha: a });
-  text(ctx, 'R or click to light another', W / 2, 420, { size: 13, align: 'center', alpha: t > 0.8 ? 1 : 0.3 });
+  text(ctx, 'R or click to light another  ·  Y copy seed', W / 2, 420, { size: 13, align: 'center', alpha: t > 0.8 ? 1 : 0.3 });
+  text(ctx, `seed ${seed}`, 16, H - 14, { size: 11, color: C.dim, align: 'left' });
 }
 
 export { C as COLORS, isLit };

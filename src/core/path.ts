@@ -1,11 +1,12 @@
-import { MAP_W, MAP_H } from './config.js';
-import { DIRS4, idx, walkable } from './grid.js';
+import { MAP_W, MAP_H } from './config.ts';
+import { DIRS4, idx, walkable } from './grid.ts';
+import type { Cell } from './types.ts';
 
 const N = MAP_W * MAP_H;
 
 // Breadth-first distance from one or more sources over walkable tiles (4-directional).
 // -1 means unreachable. This is the "Dijkstra map" the AI reads: step to the neighbor with the lowest value.
-export function distanceMap(tiles, sources) {
+export function distanceMap(tiles: Uint8Array, sources: Cell[]): Int16Array {
   const dist = new Int16Array(N).fill(-1);
   const queue = new Int32Array(N);
   let head = 0;
@@ -38,7 +39,7 @@ export function distanceMap(tiles, sources) {
 // every tile is at most 1 above its lowest neighbor. Walking downhill on it leads away from the
 // player while preferring open space over dead ends, because a far corner's low value pulls harder
 // than the nearest wall.
-export function fleeMap(tiles, playerDist) {
+export function fleeMap(tiles: Uint8Array, playerDist: Int16Array): Float32Array {
   const f = new Float32Array(N).fill(Infinity);
   for (let i = 0; i < N; i++) if (playerDist[i] >= 0) f[i] = -1.2 * playerDist[i];
   for (let changed = true; changed; ) {
@@ -64,9 +65,15 @@ export function fleeMap(tiles, playerDist) {
 
 // The best step downhill from (x, y) on `map`, among tiles `free(nx, ny)` allows.
 // Returns [nx, ny], or null when no neighbor is strictly lower.
-export function downhill(map, tiles, x, y, free) {
-  let best = null;
-  let bestV = map[idx(x, y)];
+export function downhill(
+  map: Int16Array | Float32Array,
+  tiles: Uint8Array,
+  x: number,
+  y: number,
+  free: (x: number, y: number) => boolean,
+): Cell | null {
+  let best: Cell | null = null;
+  let bestV: number = map[idx(x, y)];
   if (bestV < 0 && map instanceof Int16Array) bestV = Infinity; // unreachable source tile
   for (const [dx, dy] of DIRS4) {
     const nx = x + dx;

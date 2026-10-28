@@ -1,17 +1,36 @@
 {
   "name": "wick",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A turn-based roguelike where your lantern oil is your field of view.",
   "type": "module",
   "private": true,
   "license": "MIT",
   "scripts": {
-    "start": "npx --yes serve -l 8080 .",
-    "test": "node --test",
-    "check": "node scripts/check.mjs",
-    "tasks": "node tasks/verify.mjs"
+    "clean": "node scripts/clean.mjs",
+    "check": "tsc -p tsconfig.test.json",
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs 8080",
+    "start": "npm run build && node scripts/dev.mjs 8080",
+    "serve": "node scripts/serve.mjs 8080",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.ts\"",
+    "tasks": "node tasks/verify.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:chromium": "node scripts/smoke.mjs --browser=chromium",
+    "smoke:firefox": "node scripts/smoke.mjs --browser=firefox",
+    "smoke:webkit": "node scripts/smoke.mjs --browser=webkit",
+    "a11y": "node scripts/a11y.mjs",
+    "package": "node scripts/package.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "verify": "npm run check && npm run build && node scripts/check-boundaries.mjs && node scripts/check-module-graph.mjs --prefix /wick/ && npm test && npm run tasks && npm run smoke && npm run a11y"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "axe-core": "^4.10.0",
+    "playwright-core": "^1.56.1",
+    "typescript": "^7.0.2"
   }
 }

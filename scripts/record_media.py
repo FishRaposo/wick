@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 OUT = sys.argv[1]
 BASE = sys.argv[2] if len(sys.argv) > 2 else 'http://localhost:8080'
-STEP = """async () => { const g = window.__wick; const s = g.s; const { distanceMap } = await import('/src/path.js');
+STEP = """async () => { const g = window.__wick; const s = g.s; const { distanceMap } = await import('/dist/core/path.js');
   s.player.hp = s.player.maxHp;
   const W = 40, at = (x, y) => y * W + x;
   const dirs = [[0,-1,'ArrowUp'],[1,0,'ArrowRight'],[0,1,'ArrowDown'],[-1,0,'ArrowLeft']];

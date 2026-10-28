@@ -1,8 +1,8 @@
-diff --git a/src/rules.js b/src/rules.js
-index 102ba89..7a6b6de 100644
---- a/src/rules.js
-+++ b/src/rules.js
-@@ -48,7 +48,7 @@ export function enterFloor(s, depth, floor = generateFloor(depth, s.rng)) {
+diff --git a/src/core/rules.ts b/src/core/rules.ts
+index 957a051..b0a2bfa 100644
+--- a/src/core/rules.ts
++++ b/src/core/rules.ts
+@@ -51,7 +51,7 @@ export function enterFloor(s: RunState, depth: number, floor: Floor = generateFl
    s.player.x = floor.start.x;
    s.player.y = floor.start.y;
    s.items = floor.items.map((i) => ({ ...i }));
@@ -11,20 +11,25 @@ index 102ba89..7a6b6de 100644
    s.seen.fill(0);
    s.noise = null;
    updateVision(s);
-diff --git a/test/rules.test.js b/test/rules.test.js
-index 5fd77f5..bd87ff4 100644
---- a/test/rules.test.js
-+++ b/test/rules.test.js
-@@ -235,24 +235,6 @@ test('a hound does not hear through solid rock', () => {
+
+diff --git a/test/rules.test.ts b/test/rules.test.ts
+index 31bcac5..00c262b 100644
+--- a/test/rules.test.ts
++++ b/test/rules.test.ts
+@@ -243,27 +243,6 @@ test('a hound does not hear through solid rock', () => {
    assert.equal(s.enemies[0].target, null);
  });
  
 -test('taking the stairs builds a new floor with its own enemies', () => {
--  const s = createRun(12);
+-  const s = createRun(12, { content: CONTENT });
 -  const firstIds = new Set(s.enemies.map((e) => e.id));
 -  // Teleport next to the stairs and step on.
 -  const d = distanceMap(s.tiles, [[s.stairs.x, s.stairs.y]]);
--  const [nx, ny] = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => [s.stairs.x + dx, s.stairs.y + dy]).find(([x, y]) => d[idx(x, y)] === 1);
+-  const spot = [[0, -1], [1, 0], [0, 1], [-1, 0]]
+-    .map(([dx, dy]): Cell => [s.stairs.x + dx, s.stairs.y + dy])
+-    .find(([x, y]) => d[idx(x, y)] === 1);
+-  assert.ok(spot);
+-  const [nx, ny] = spot;
 -  s.player.x = nx;
 -  s.player.y = ny;
 -  for (const e of s.enemies) if (Math.abs(e.x - nx) + Math.abs(e.y - ny) <= 1) e.x = e.y = -10;
@@ -36,7 +41,7 @@ index 5fd77f5..bd87ff4 100644
 -    assert.notEqual(s.tiles[idx(e.x, e.y)], TILE.WALL);
 -  }
 -});
--
- test('bumping an enemy attacks it; killing scores', () => {
-   const s = createRun(7, { generate: false });
-   loadMap(s, openRoom({ '5,10': '@', '6,10': 'h' }));
+ 
+ 
+ test('a lurker wakes when it sees the player and loses interest in the dark', () => {
+

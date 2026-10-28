@@ -1,37 +1,30 @@
-diff --git a/src/rules.js b/src/rules.js
-index 102ba89..8b7102b 100644
---- a/src/rules.js
-+++ b/src/rules.js
-@@ -191,7 +191,6 @@ function enemiesAct(s) {
-   const p = s.player;
-   const toPlayer = distanceMap(s.tiles, [[p.x, p.y]]);
-   let flee = null; // built lazily: only shades need it
--  const heard = s.noise ? distanceMap(s.tiles, [[s.noise.x, s.noise.y]]) : null;
- 
-   for (const e of s.enemies) {
-     if (e.hp <= 0 || s.over) continue;
-@@ -219,11 +218,11 @@ function enemiesAct(s) {
-         wander(s, e);
+diff --git a/src/content/enemies.ts b/src/content/enemies.ts
+index 94eb849..ee34045 100644
+--- a/src/content/enemies.ts
++++ b/src/content/enemies.ts
+@@ -58,11 +58,11 @@ const HOUND: EnemyDef = {
+   points: 20,
+   act(ctx: EnemyContext): void {
+     const { state: s, enemy: e, noise, heard } = ctx;
+-    // Hounds hunt by sound. A noise reaches a hound if it's within the noise's range measured
+-    // along the corridors, not through rock. They go to where they heard it, then sniff around.
+-    if (heard && noise) {
+-      const hd = heard[idx(e.x, e.y)];
+-      if (hd >= 0 && hd <= noise.r) {
++    // Hounds hunt by sound. A noise reaches a hound within the noise's range.
++    // They go to where they heard it, then sniff around.
++    if (noise) {
++      const hd = Math.hypot(e.x - noise.x, e.y - noise.y); // cheaper than a pathfind every turn
++      if (hd <= noise.r) {
+         if (!e.target) s.events.push({ type: 'alert', id: e.id, x: e.x, y: e.y });
+         e.target = { x: noise.x, y: noise.y };
        }
-     } else if (e.kind === 'hound') {
--      // Hounds hunt by sound. A noise reaches a hound if it's within the noise's range measured
--      // along the corridors, not through rock. They go to where they heard it, then sniff around.
--      if (heard) {
--        const hd = heard[idx(e.x, e.y)];
--        if (hd >= 0 && hd <= s.noise.r) {
-+      // Hounds hunt by sound. A noise reaches a hound within the noise's range.
-+      // They go to where they heard it, then sniff around.
-+      if (s.noise) {
-+        const hd = Math.hypot(e.x - s.noise.x, e.y - s.noise.y); // cheaper than a pathfind every turn
-+        if (hd <= s.noise.r) {
-           if (!e.target) s.events.push({ type: 'alert', id: e.id, x: e.x, y: e.y });
-           e.target = { x: s.noise.x, y: s.noise.y };
-         }
-diff --git a/test/rules.test.js b/test/rules.test.js
-index 5fd77f5..0770bc4 100644
---- a/test/rules.test.js
-+++ b/test/rules.test.js
-@@ -224,17 +224,6 @@ test('a hound hears footsteps along the corridors, then comes to where it heard
+
+diff --git a/test/rules.test.ts b/test/rules.test.ts
+index 31bcac5..7e61a96 100644
+--- a/test/rules.test.ts
++++ b/test/rules.test.ts
+@@ -232,16 +232,6 @@ test('a hound hears footsteps along the corridors, then comes to where it heard
    assert.equal(t.enemies[0].target, null, 'waiting makes no sound');
  });
  
@@ -40,12 +33,12 @@ index 5fd77f5..0770bc4 100644
 -  const rows = openRoom();
 -  for (let y = 1; y < MAP_H - 2; y++) rows[y] = rows[y].slice(0, 8) + '#' + rows[y].slice(9);
 -  rows[10] = rows[10].slice(0, 6) + '@' + rows[10].slice(7, 10) + 'h' + rows[10].slice(11);
--  const s = createRun(6, { generate: false });
+-  const s = createRun(6, { generate: false, content: CONTENT });
 -  loadMap(s, rows);
 -  act(s, move(0, -1));
 -  assert.equal(s.enemies[0].target, null);
 -});
--
+ 
  test('taking the stairs builds a new floor with its own enemies', () => {
-   const s = createRun(12);
-   const firstIds = new Set(s.enemies.map((e) => e.id));
+   const s = createRun(12, { content: CONTENT });
+

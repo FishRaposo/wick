@@ -1,19 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRun, loadMap, act, radius, isLit, enemyAt } from '../src/rules.js';
-import { generateFloor, enemyBudget } from '../src/gen.js';
-import { computeFov } from '../src/fov.js';
-import { distanceMap, fleeMap, downhill } from '../src/path.js';
-import { parseMap, idx } from '../src/grid.js';
-import { Rng } from '../src/rng.js';
-import { MAP_W, MAP_H, TILE, ENEMY, lightRadius } from '../src/config.js';
+import { createRun, loadMap, act, radius, isLit, enemyAt, updateVision } from '../src/core/rules.ts';
+import { generateFloor, enemyBudget } from '../src/core/gen.ts';
+import { computeFov } from '../src/core/fov.ts';
+import { distanceMap, fleeMap, downhill } from '../src/core/path.ts';
+import { parseMap, idx } from '../src/core/grid.ts';
+import { Rng } from '../src/core/rng.ts';
+import { MAP_W, MAP_H, TILE, lightRadius } from '../src/core/config.ts';
+import { CONTENT } from '../src/content/index.ts';
+import type { Action, Cell } from '../src/core/types.ts';
 
 const N = MAP_W * MAP_H;
-const move = (dx, dy) => ({ type: 'move', dx, dy });
-const WAIT = { type: 'wait' };
+const move = (dx: number, dy: number): Action => ({ type: 'move', dx, dy });
+const WAIT: Action = { type: 'wait' };
 
 // A 38×19 open room inside the border.
-const openRoom = (marks = {}) => {
+const openRoom = (marks: Record<string, string> = {}) => {
   const rows = [];
   for (let y = 0; y < MAP_H; y++) {
     let row = '';
@@ -29,7 +31,7 @@ test('every generated floor is fully connected, over 300 seeds × 6 depths', () 
   for (let seed = 1; seed <= 300; seed++) {
     const rng = new Rng(seed);
     for (let depth = 1; depth <= 6; depth++) {
-      const f = generateFloor(depth, rng);
+      const f = generateFloor(depth, rng, CONTENT);
       const d = distanceMap(f.tiles, [[f.start.x, f.start.y]]);
       for (let i = 0; i < N; i++) if (f.tiles[i] !== TILE.WALL) assert.ok(d[i] >= 0, `seed ${seed} depth ${depth}: tile ${i} unreachable`);
     }
@@ -38,7 +40,7 @@ test('every generated floor is fully connected, over 300 seeds × 6 depths', () 
 
 test('the stairs are the farthest reachable tile from the start', () => {
   for (let seed = 1; seed <= 100; seed++) {
-    const f = generateFloor(2, new Rng(seed));
+    const f = generateFloor(2, new Rng(seed), CONTENT);
     const d = distanceMap(f.tiles, [[f.start.x, f.start.y]]);
     const stairs = d[idx(f.stairs.x, f.stairs.y)];
     assert.ok(stairs > 0);
@@ -49,15 +51,21 @@ test('the stairs are the farthest reachable tile from the start', () => {
 test('spawns respect unlock depth, budget and distance from the start, and never stack', () => {
   for (let seed = 1; seed <= 100; seed++) {
     for (const depth of [1, 2, 3, 5]) {
-      const f = generateFloor(depth, new Rng(seed * 7 + depth));
+      const f = generateFloor(depth, new Rng(seed * 7 + depth), CONTENT);
       const d = distanceMap(f.tiles, [[f.start.x, f.start.y]]);
-      const cost = f.spawns.reduce((a, s) => a + ENEMY[s.kind].cost, 0);
+      const cost = f.spawns.reduce((a, s) => a + CONTENT.enemies[s.kind].cost, 0);
       assert.ok(cost <= enemyBudget(depth));
-      const spots = new Set();
-      for (const s of [...f.spawns, ...f.items]) {
-        assert.ok(depth >= (ENEMY[s.kind]?.unlock ?? 1));
-        assert.ok(d[idx(s.x, s.y)] >= 3);
-        const k = idx(s.x, s.y);
+      const spots = new Set<number>();
+      for (const spawn of f.spawns) {
+        assert.ok(depth >= CONTENT.enemies[spawn.kind].unlock);
+        assert.ok(d[idx(spawn.x, spawn.y)] >= 3);
+        const k = idx(spawn.x, spawn.y);
+        assert.ok(!spots.has(k), 'two things on one tile');
+        spots.add(k);
+      }
+      for (const item of f.items) {
+        assert.ok(d[idx(item.x, item.y)] >= 3);
+        const k = idx(item.x, item.y);
         assert.ok(!spots.has(k), 'two things on one tile');
         spots.add(k);
       }
@@ -66,8 +74,8 @@ test('spawns respect unlock depth, budget and distance from the start, and never
 });
 
 test('same seed, same run', () => {
-  const a = createRun(99);
-  const b = createRun(99);
+  const a = createRun(99, { content: CONTENT });
+  const b = createRun(99, { content: CONTENT });
   for (let i = 0; i < 40; i++) {
     const m = [move(1, 0), move(0, 1), move(-1, 0), move(0, -1), WAIT][i % 5];
     act(a, m);
@@ -92,7 +100,7 @@ test('in an open room, the light is a full circle of the expected radius', () =>
 });
 
 test('walls are lit but block what is behind them', () => {
-  const marks = {};
+  const marks: Record<string, string> = {};
   for (let y = 1; y < MAP_H - 1; y++) marks[`22,${y}`] = '#';
   const { tiles } = parseMap(openRoom(marks));
   const out = new Uint8Array(N);
@@ -103,12 +111,12 @@ test('walls are lit but block what is behind them', () => {
 
 test('FOV is symmetric for floor tiles in a cluttered room', () => {
   const rng = new Rng(5);
-  const marks = {};
+  const marks: Record<string, string> = {};
   for (let k = 0; k < 60; k++) marks[`${rng.int(1, 38)},${rng.int(1, 19)}`] = '#';
   const { tiles } = parseMap(openRoom(marks));
   const a = new Uint8Array(N);
   const b = new Uint8Array(N);
-  const floors = [];
+  const floors: Cell[] = [];
   for (let i = 0; i < N; i++) if (tiles[i] !== TILE.WALL) floors.push([i % MAP_W, (i / MAP_W) | 0]);
   let asym = 0;
   for (let k = 0; k < 200; k++) {
@@ -151,7 +159,7 @@ test('the flee map leads away from the player and out of dead ends', () => {
 // ------------------------------------------------------------------ turns and rules
 
 test('walking into a wall is free: no turn, no oil, no enemy move', () => {
-  const s = createRun(1, { generate: false });
+  const s = createRun(1, { generate: false, content: CONTENT });
   loadMap(s, openRoom({ '1,1': '@', '10,10': 'h' }));
   const before = { turn: s.turn, oil: s.player.oil, h: [s.enemies[0].x, s.enemies[0].y] };
   assert.equal(act(s, move(-1, 0)), false);
@@ -159,7 +167,7 @@ test('walking into a wall is free: no turn, no oil, no enemy move', () => {
 });
 
 test('oil burns one point every two turns, and the light shrinks with it', () => {
-  const s = createRun(1, { generate: false });
+  const s = createRun(1, { generate: false, content: CONTENT });
   loadMap(s, openRoom({ '5,5': '@' }));
   s.player.oil = 21;
   act(s, WAIT);
@@ -170,7 +178,7 @@ test('oil burns one point every two turns, and the light shrinks with it', () =>
 });
 
 test('picking up oil and bandages', () => {
-  const s = createRun(1, { generate: false });
+  const s = createRun(1, { generate: false, content: CONTENT });
   loadMap(s, openRoom({ '5,5': '@', '6,5': 'o', '7,5': '+' }));
   s.player.oil = 50;
   s.player.hp = 2;
@@ -182,13 +190,13 @@ test('picking up oil and bandages', () => {
 });
 
 test('a moth flies at a burning lantern, ignores a dry one', () => {
-  const s = createRun(3, { generate: false });
+  const s = createRun(3, { generate: false, content: CONTENT });
   loadMap(s, openRoom({ '5,10': '@', '14,10': 'm' }));
   const start = Math.abs(s.enemies[0].x - 5);
   for (let i = 0; i < 6; i++) act(s, WAIT);
   assert.ok(Math.abs(s.enemies[0].x - 5) < start - 2, 'closed in');
 
-  const t = createRun(3, { generate: false });
+  const t = createRun(3, { generate: false, content: CONTENT });
   loadMap(t, openRoom({ '5,10': '@', '14,10': 'm' }));
   t.player.oil = 0;
   let closest = 9;
@@ -200,7 +208,7 @@ test('a moth flies at a burning lantern, ignores a dry one', () => {
 });
 
 test('a shade in the bright core flees, waits outside it, and strikes only when the lantern is dry', () => {
-  const s = createRun(4, { generate: false });
+  const s = createRun(4, { generate: false, content: CONTENT });
   loadMap(s, openRoom({ '19,10': '@', '22,10': 's' }));
   assert.ok(isLit(s, 22, 10, 2));
   for (let i = 0; i < 8; i++) act(s, WAIT);
@@ -214,11 +222,11 @@ test('a shade in the bright core flees, waits outside it, and strikes only when 
 });
 
 test('a hound hears footsteps along the corridors, then comes to where it heard them', () => {
-  const s = createRun(5, { generate: false });
+  const s = createRun(5, { generate: false, content: CONTENT });
   loadMap(s, openRoom({ '5,10': '@', '9,10': 'h' }));
   act(s, move(0, 1)); // noise 5, hound 4 steps away
   assert.ok(s.enemies[0].target, 'heard it');
-  const t = createRun(5, { generate: false });
+  const t = createRun(5, { generate: false, content: CONTENT });
   loadMap(t, openRoom({ '5,10': '@', '9,10': 'h' }));
   act(t, WAIT); // silent
   assert.equal(t.enemies[0].target, null, 'waiting makes no sound');
@@ -229,18 +237,22 @@ test('a hound does not hear through solid rock', () => {
   const rows = openRoom();
   for (let y = 1; y < MAP_H - 2; y++) rows[y] = rows[y].slice(0, 8) + '#' + rows[y].slice(9);
   rows[10] = rows[10].slice(0, 6) + '@' + rows[10].slice(7, 10) + 'h' + rows[10].slice(11);
-  const s = createRun(6, { generate: false });
+  const s = createRun(6, { generate: false, content: CONTENT });
   loadMap(s, rows);
   act(s, move(0, -1));
   assert.equal(s.enemies[0].target, null);
 });
 
 test('taking the stairs builds a new floor with its own enemies', () => {
-  const s = createRun(12);
+  const s = createRun(12, { content: CONTENT });
   const firstIds = new Set(s.enemies.map((e) => e.id));
   // Teleport next to the stairs and step on.
   const d = distanceMap(s.tiles, [[s.stairs.x, s.stairs.y]]);
-  const [nx, ny] = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => [s.stairs.x + dx, s.stairs.y + dy]).find(([x, y]) => d[idx(x, y)] === 1);
+  const spot = [[0, -1], [1, 0], [0, 1], [-1, 0]]
+    .map(([dx, dy]): Cell => [s.stairs.x + dx, s.stairs.y + dy])
+    .find(([x, y]) => d[idx(x, y)] === 1);
+  assert.ok(spot);
+  const [nx, ny] = spot;
   s.player.x = nx;
   s.player.y = ny;
   for (const e of s.enemies) if (Math.abs(e.x - nx) + Math.abs(e.y - ny) <= 1) e.x = e.y = -10;
@@ -253,13 +265,46 @@ test('taking the stairs builds a new floor with its own enemies', () => {
   }
 });
 
+
+test('a lurker wakes when it sees the player and loses interest in the dark', () => {
+  const s = createRun(8, { generate: false, content: CONTENT });
+  loadMap(s, openRoom({ '5,10': '@', '10,10': 'l' }));
+  act(s, WAIT);
+  assert.ok(s.enemies[0].target, 'woke when the lantern lit it');
+  s.player.x = 1;
+  s.player.y = 1;
+  s.player.oil = 0;
+  updateVision(s);
+  for (let i = 0; i < 5; i++) act(s, WAIT);
+  assert.equal(s.enemies[0].target, null, 'lost interest after five dark turns');
+});
+
+test('resin adds two light radius for thirty turns', () => {
+  const s = createRun(9, { generate: false, content: CONTENT });
+  loadMap(s, openRoom({ '5,10': '@', '6,10': 'r' }));
+  act(s, move(1, 0));
+  assert.equal(s.player.resin, 29); // the pickup turn already burns one
+  assert.equal(radius(s), 9);
+  for (let i = 0; i < 29; i++) act(s, WAIT);
+  assert.equal(radius(s), 7);
+});
+
+test('depth themes change the enemy mix and debut the lurker', () => {
+  assert.equal(generateFloor(1, new Rng(4), CONTENT).theme, 'Cellar');
+  assert.equal(generateFloor(4, new Rng(4), CONTENT).theme, 'Deep Cellar');
+  const early = generateFloor(1, new Rng(4), CONTENT);
+  assert.ok(!early.spawns.some((sp) => sp.kind === 'lurker'));
+  const deep = generateFloor(4, new Rng(4), CONTENT);
+  assert.ok(deep.spawns.some((sp) => sp.kind === 'lurker'), 'lurker debuts on floor 4');
+});
+
 test('bumping an enemy attacks it; killing scores', () => {
-  const s = createRun(7, { generate: false });
+  const s = createRun(7, { generate: false, content: CONTENT });
   loadMap(s, openRoom({ '5,10': '@', '6,10': 'h' }));
   act(s, move(1, 0));
   act(s, move(1, 0));
   act(s, move(1, 0));
   assert.equal(enemyAt(s, 6, 10), undefined);
   assert.equal(s.kills, 1);
-  assert.equal(s.score, ENEMY.hound.points);
+  assert.equal(s.score, CONTENT.enemies.hound.points);
 });
