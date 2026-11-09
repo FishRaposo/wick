@@ -89,3 +89,10 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* Access floor: generated settings and pause dialogs. */
+dialog button { min-height:44px; }
+dialog input[type="range"] { height:44px; }
+dialog input[type="checkbox"] { width:24px; height:24px; }
+dialog label { display:inline-flex; align-items:center; gap:8px; min-height:44px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; } }
