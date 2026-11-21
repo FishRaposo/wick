@@ -22,6 +22,20 @@ function installStorage(): MemoryStorage {
   return storage;
 }
 
+function installBlockedStorage(): void {
+  const boom = (): never => {
+    throw new Error('SecurityError: storage is blocked');
+  };
+  (globalThis as { localStorage: Storage }).localStorage = {
+    get length(): number { return boom(); },
+    clear: boom,
+    getItem: boom,
+    key: boom,
+    removeItem: boom,
+    setItem: boom,
+  } as unknown as Storage;
+}
+
 test('best score round-trips and rejects malformed data', () => {
   const storage = installStorage();
   saveBest({ score: 120, depth: 4 });
@@ -73,4 +87,21 @@ test('legacy mute preference migrates into settings', () => {
   const storage = installStorage();
   storage.setItem('wick.muted.v1', '1');
   assert.equal(loadSettings().muted, true);
+});
+
+test('blocked storage plays on without persistence', () => {
+  installBlockedStorage();
+
+  assert.deepEqual(loadBest(), { score: 0, depth: 0 });
+  assert.equal(loadSave(), null);
+  assert.equal(loadSettings().version, 1);
+  assert.doesNotThrow(() => saveBest({ score: 10, depth: 2 }));
+  assert.doesNotThrow(() => saveRun(snapshotRun(createRun(7, { content: CONTENT }))));
+  assert.doesNotThrow(() => clearSave());
+  assert.doesNotThrow(() => saveSettings(defaultSettings()));
+
+  delete (globalThis as { localStorage?: Storage }).localStorage;
+  assert.deepEqual(loadBest(), { score: 0, depth: 0 });
+  assert.equal(loadSave(), null);
+  assert.equal(loadSettings().version, 1);
 });
