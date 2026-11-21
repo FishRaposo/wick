@@ -2,6 +2,20 @@
 
 All notable changes to Wick are recorded here. The format follows Keep a Changelog; versions follow SemVer.
 
+## [1.1.1] — 2026-11-21
+
+### Added
+
+- Visible keyboard focus ring on the game canvas, in the game's parchment palette.
+
+### Fixed
+
+- Closing a menu no longer restores focus to the invoking button after the player has already moved focus into the game.
+
+### Tests
+
+- 28 unit tests: adds the blocked-storage case (`localStorage` access throws) required by the shared player contract, so a removed guard fails the suite.
+
 ## [1.1.0] — 2026-10-28
 
 ### Added

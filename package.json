@@ -1,6 +1,6 @@
 {
   "name": "wick",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A turn-based roguelike where your lantern oil is your field of view.",
   "type": "module",
   "private": true,

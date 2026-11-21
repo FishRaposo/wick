@@ -96,9 +96,12 @@ export class Menus {
     for (const action of actions) bar.append(action);
     dialog.append(heading, content, bar);
     dialog.addEventListener('close', () => {
+      // 'close' fires as a queued task, so focus may already have moved on. Ask
+      // before removing the dialog: once it is gone nothing is contained by it.
+      const focusInside = dialog.contains(document.activeElement) || document.activeElement === document.body;
       dialog.remove();
       this.dialog = null;
-      this.returnFocus?.focus();
+      if (focusInside) this.returnFocus?.focus();
       onClose?.();
     });
     this.root.append(dialog);
